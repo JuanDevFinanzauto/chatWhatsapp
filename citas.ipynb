@@ -1,0 +1,418 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 34,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import getpass\n",
+    "import os\n",
+    "from langchain_groq import ChatGroq\n",
+    "import time\n",
+    "import langchain, langgraph\n",
+    "\n",
+    "if \"GROQ_API_KEY\" not in os.environ:\n",
+    "    os.environ[\"GROQ_API_KEY\"] = getpass.getpass(\"llmgsk_6QCRZZGxVnJEd9PVrxmfWGdyb3FYLMhr7XESbMf6LJeElvRKiy0C\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 35,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "llm = ChatGroq(groq_api_key=os.environ['GROQ_API_KEY'], model_name=\"llama3-70b-8192\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "class WorkflowContext:\n",
+    "    def __init__(self, user, email, number):\n",
+    "        self.user = user\n",
+    "        self.email = email\n",
+    "        self.number = number\n",
+    "\n",
+    "context = WorkflowContext(user=\"Alice\", email=\"alice@example.com\", number=\"123456789\")\n",
+    "print(context.number)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Nodos   "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 55,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "class WaitNode(context):\n",
+    "\n",
+    "    def __init__(self, name, wait_time, on_timeout, on_tick, tick_interval):\n",
+    "        self.name = name\n",
+    "        self.wait_time = wait_time\n",
+    "        self.on_timeout = on_timeout\n",
+    "        self.on_tick = on_tick\n",
+    "        self.tick_interval = tick_interval\n",
+    "        self.last_tick = time.time()\n",
+    "    \n",
+    "    def execute(self, context):\n",
+    "        context = context.copy()\n",
+    "        time.sleep(self.wait_time)\n",
+    "        if self.on_timeout:\n",
+    "            return self.on_timeout()\n",
+    "        else:\n",
+    "            return self.on_tick()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 53,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "class RedirectNode():\n",
+    "    #super().__init__(id)\n",
+    "    def __init__(self, id, redirected_to):\n",
+    "        self.id = id\n",
+    "        self.redirected_to = redirected_to\n",
+    "\n",
+    "    def execute(self, context):\n",
+    "        return self.redirected_to"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 52,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "class SendMessageNode():\n",
+    "    def __init__(self,id, message):\n",
+    "        self.id = id\n",
+    "        self.message = message\n",
+    "\n",
+    "    def execute(self, context):\n",
+    "        print(self.message)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 51,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "class SurveyNode():\n",
+    "    def __init__(self, id, survey_questions, on_complete):\n",
+    "        #super().__init__(id)\n",
+    "        self.id = id\n",
+    "        self.survey_questions = survey_questions\n",
+    "        self.on_complete = on_complete\n",
+    "    \n",
+    "    def execute(self, context):\n",
+    "        for question in self.survey_questions:\n",
+    "            print(question)\n",
+    "        return self.on_complete"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 21,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "timer_5min_node = WaitNode(\n",
+    "    name=\"timer_5min_node\",\n",
+    "    wait_time=300,\n",
+    "    on_timeout=\"redirect_to_survey\",\n",
+    "    on_tick=\"send_reminder\",\n",
+    "    tick_interval=120\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 22,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "send_reminder_node = SendMessageNode(\n",
+    "    id=\"send_reminder\",\n",
+    "    message=\"Recuerda iniciar sesion para continuar, tienes 3 minutos restantes antes que se finalice el chat.\",\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "redirect_to_survey_node = RedirectNode(\n",
+    "    id=\"redirect_to_survey_node\",\n",
+    "    redirected_to=\"survey\",\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 26,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "survey_node = SurveyNode(\n",
+    "    id=\"survey\",\n",
+    "    survey_questions=get_questions(),\n",
+    "    on_complete=\"process_survey_results\",\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 25,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def get_questions():\n",
+    "    questions = [\n",
+    "        \"¿Como calificarías la información recibida?\",\n",
+    "        \"¿Deseas dejar algun comentario?\",\n",
+    "        \n",
+    "    ]\n",
+    "    '''if context.previous_dissatisfaction:\n",
+    "        questions.append(\"Parece que tuviste problemas anteriormente. ¿Qué podriamos mejorar?\")\n",
+    "    '''\n",
+    "    return questions"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def SentimentalAnalysis(comment):\n",
+    "    prompt = (\n",
+    "        f\"Clasifica el siguiente comentario como 'positivo', 'negativo' o 'neutral':\\n\"\n",
+    "        f\"Comentario: \\\"{comment}\\\"\\n\"\n",
+    "        f\"Respuesta:\"\n",
+    "    )\n",
+    "    response = llm.predict(prompt)\n",
+    "    return response.strip().lower()\n",
+    "\n",
+    "'''\n",
+    "\n",
+    "# Ejemplo de uso\n",
+    "resultado = SentimentalAnalysis(\"Ni bien ni mal\")\n",
+    "print(resultado)  # Output esperado: \"positivo\"\n",
+    "\n",
+    "'''"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def process_survey_results(survey_results, context):\n",
+    "    comment = survey_results.get('comentarios', '')\n",
+    "    sentiment = SentimentalAnalysis(comment)\n",
+    "\n",
+    "    whatsapp_message = (\n",
+    "        \"Gracias por tu retroalimentación. Estamos muy contentos de que hayas tenido éxito con nuestro producto. \"\n",
+    "        \"Si tienes alguna pregunta o necesitas ayuda adicional, no dudes en contactarnos. ¡Estamos aquí para ayudarte!\"\n",
+    "        if sentiment == \"positivo\"\n",
+    "        else f\"Lamentamos que no estés satisfecho. {survey_results.get('comentarios_adicionales', '')}\"\n",
+    "    )\n",
+    "\n",
+    "    print(whatsapp_message)\n",
+    "'''\n",
+    "implementacion envio de mensajes\n",
+    "    try:\n",
+    "        send_whatsapp_message(context.number, whatsapp_message)\n",
+    "    except Exception as e:\n",
+    "        log_error(f\"Error enviando mensaje por WhatsApp: {e}\")\n",
+    "'''"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "StartNode: {\n",
+    "    print(\"Hola, ¿en qué puedo ayudarte hoy?\")\n",
+    "}\n",
+    "\n",
+    "EndNode: {\n",
+    "    print(\"¡Gracias por usar el chatbot!\")\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Se debe crear una funcion en twllio para enviar mensajes a los usuarios\n",
+    "\n",
+    "## Ejemplo:\n",
+    "def send_whatsapp_message(phone_number, message):\n",
+    "\n",
+    "    client = Client(account_sid, auth_token)\n",
+    "\n",
+    "    try:\n",
+    "        message = client.messages.create(\n",
+    "            body=message,\n",
+    "            from_=twilio_number,\n",
+    "            to=f'whatsapp:{phone_number}'\n",
+    "        )\n",
+    "        print(f\"Mensaje enviado a {phone_number}: {message.sid}\")\n",
+    "    except Exception as e:\n",
+    "        print(f\"Error al enviar el mensaje: {e}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 64,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def start(input):\n",
+    "    return input + \"Bienvenido al chatbot de prueba\"\n",
+    "\n",
+    "def end(input):\n",
+    "    input = input\n",
+    "    return \"Gracias por usar el chatbot\""
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import time\n",
+    "\n",
+    "class WaitNode:\n",
+    "    def __init__(self, name, wait_time, on_timeout, on_tick, tick_interval):\n",
+    "        self.name = name\n",
+    "        self.wait_time = wait_time\n",
+    "        self.on_timeout = on_timeout\n",
+    "        self.on_tick = on_tick\n",
+    "        self.tick_interval = tick_interval\n",
+    "        self.last_tick = time.time()\n",
+    "\n",
+    "    def execute(self):\n",
+    "        start_time = time.time()\n",
+    "        while time.time() - start_time < self.wait_time:\n",
+    "            time.sleep(self.tick_interval)\n",
+    "            if self.on_tick:\n",
+    "                self.on_tick()\n",
+    "            self.last_tick = time.time()\n",
+    "        \n",
+    "        if self.on_timeout:\n",
+    "            return self.on_timeout()\n",
+    "        return None\n",
+    "\n",
+    "def redirect_to_survey():\n",
+    "    return \"Redirigiendo a la encuesta.\"\n",
+    "\n",
+    "def send_reminder():\n",
+    "    print(\"Enviando recordatorio.\")\n",
+    "\n",
+    "# Crear el nodo de espera\n",
+    "timer_5min_node = WaitNode(\n",
+    "    name=\"timer_5min_node\",\n",
+    "    wait_time=300,  # 5 minutos\n",
+    "    on_timeout=redirect_to_survey,\n",
+    "    on_tick=send_reminder,\n",
+    "    tick_interval=120  # 2 minutos\n",
+    ")\n",
+    "\n",
+    "# Ejecutar el nodo de espera\n",
+    "result = timer_5min_node.execute()\n",
+    "print(result)\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 66,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from langgraph.graph import Graph\n",
+    "\n",
+    "workflow = Graph()\n",
+    "\n",
+    "workflow.add_node(\"node_1\", start)\n",
+    "workflow.add_node(\"node_2\", )\n",
+    "workflow.add_node(\"node_5\", end)\n",
+    "\n",
+    "workflow.add_edge(\"node_1\", \"node_2\")\n",
+    "\n",
+    "workflow.set_entry_point(\"node_1\")\n",
+    "workflow.set_finish_point(\"node_2\")\n",
+    "\n",
+    "app = workflow.compile()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 67,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "'Gracias por usar el chatbot'"
+      ]
+     },
+     "execution_count": 67,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "app.invoke(\"hola mundo\")\n"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.12.6"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
